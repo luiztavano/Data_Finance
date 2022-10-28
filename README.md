@@ -1,2 +1,3 @@
 # Data_Finance
-Repositório para publicação e divulgação de códigos de Finança Quantitativas
+Esse repositório foi criado com o intuito de armazenar e disponibilizar estudos e implementações de códigos de Finanças Quantitativas
+
