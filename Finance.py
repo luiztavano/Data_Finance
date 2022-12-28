@@ -10,10 +10,86 @@ import scipy.optimize as solver
 
 class Portfolio:
     
-    def __init__(self, dataset):
+    def __init__(self, dataset, calcular_retornos_diarios = True):
+        
         self.dataset = dataset
+        self.ri = dataset.pct_change(1).dropna() if calcular_retornos_diarios == True else dataset
         
+    def calcular_retorno_anual(self):
+
+        n_periodos = len(self.ri)
+        retorno_anualizado = (1+self.ri).prod()**(252/n_periodos)-1
+        retorno_anualizado = retorno_anualizado.reset_index()
+        retorno_anualizado = retorno_anualizado.rename(columns = {0:"Retorno",'index':"Ativos"}).set_index('Ativos')
         
+        return retorno_anualizado
+        
+    def calcular_volatilidade_anual(self):
+        
+        vol_anualizado = self.ri.std()*(252**0.5)
+        vol_anualizado = vol_anualizado.reset_index()
+        vol_anualizado = vol_anualizado.rename(columns = {0:"Risco",'index':"Ativos"}).set_index('Ativos')
+        
+        return vol_anualizado
+        
+    def calcular_sharpe(self, taxa_livre_risco = 0):
+        
+        #Calcular o risco das carteiras
+        retorno = self.calcular_retorno_anual() - taxa_livre_risco
+        risco = self.calcular_volatilidade_anual()
+        sharpe = retorno.merge(risco, on = "Ativos", how = "inner")
+        sharpe['Sharpe'] = sharpe['Retorno']/sharpe['Risco']
+        sharpe = sharpe.drop(columns = ['Retorno', 'Risco'])
+        
+        return sharpe
+    
+    def drawdown(self,coluna, grafico = True):
+        
+        df_drawdown = self.ri[[coluna]]
+        df_drawdown["Retorno Acumulado"] = 1000*(1+self.ri[[coluna]]).cumprod()
+        df_drawdown["Pico"] = df_drawdown["Retorno Acumulado"].cummax()
+        df_drawdown["Drawdown"] = (df_drawdown["Retorno Acumulado"] - df_drawdown["Pico"])/df_drawdown["Pico"]
+
+        df_drawdown = df_drawdown.drop(columns = coluna)
+
+        if grafico == True:
+            df_drawdown[["Retorno Acumulado","Pico"]].plot()
+
+        return df_drawdown
+    
+    def max_drawdown(self):
+        
+        max_drawdown = pd.DataFrame()
+        for coluna in self.ri.columns:
+            
+            temp_drawdown = self.drawdown(coluna, grafico = False)
+            temp_drawdown = temp_drawdown.reset_index()[["Date","Drawdown"]].min()
+            temp_drawdown = pd.DataFrame(temp_drawdown).rename(columns = {0:coluna,"Date":"Date Drawdown"}).T
+            max_drawdown = max_drawdown.append(temp_drawdown)
+            
+        max_drawdown = max_drawdown.reset_index().rename(columns = {"Date":"Date Drawdown","index":"Ativos"})
+        max_drawdown = max_drawdown.set_index("Ativos")
+            
+        return max_drawdown
+    
+    def tabela_resumo(self, taxa_livre_risco = 0):
+        
+        #Calcular o risco das carteiras
+        retorno = self.calcular_retorno_anual()
+        risco = self.calcular_volatilidade_anual()
+        sharpe = self.calcular_sharpe(taxa_livre_risco)
+        max_drawdown = self.max_drawdown()
+        
+        tabela_resumo = pd.DataFrame()
+        tabela_resumo = retorno
+        tabela_resumo = tabela_resumo.merge(risco, on = 'Ativos', how = 'inner')
+        tabela_resumo = tabela_resumo.merge(sharpe, on = 'Ativos', how = 'inner')
+        tabela_resumo = tabela_resumo.merge(max_drawdown, on = 'Ativos', how = 'inner')
+        
+        return tabela_resumo
+    
+    
+    
     def portfolio_minimo_risco(self):
         
         """
@@ -30,11 +106,10 @@ class Portfolio:
         
         """
         
-        n = len(self.dataset.columns)
+        n = len(self.ri.columns)
         
         #Calculando retorno dos ativos e covariância da carteira
-        ri = self.dataset.pct_change(1)
-        sigma = ri.cov()*252 #covariância da carteria
+        sigma = self.ri.cov()*252 #covariância da carteria
         
         #Função objetivo que minimiza o risco
         def f_obj(peso):
@@ -55,7 +130,7 @@ class Portfolio:
         
         #Formatar Dataframe com os pesos dos ativos
         pesos = outcome['x']
-        pesos = pd.DataFrame(pesos, index = self.dataset.columns, columns = ['Pesos'])
+        pesos = pd.DataFrame(pesos, index = self.ri.columns, columns = ['Pesos'])
 
         return pesos
     
@@ -75,12 +150,11 @@ class Portfolio:
             
         """
         
-        n = len(self.dataset.columns)
+        n = len(self.ri.columns)
         
-        #Calculando retorno dos ativos e covariância da carteira
-        ri = self.dataset.pct_change(1)
-        rets = ri.mean()*252
-        sigma = ri.cov()*252 #covariância da carteria
+        #Calculando retorno dos ativos e covariância da carteira  
+        rets = self.calcular_retorno_anual()
+        sigma = self.ri.cov()*252 #covariância da carteria
         
         def port_ret(peso):
             return np.sum(rets*peso)
@@ -116,9 +190,8 @@ class Portfolio:
         from Portfolio_HRP import correlDist,getQuasiDiag,getRecBipart
         import scipy.cluster.hierarchy as sch
         
-        ri = self.dataset.pct_change(1)
-        cov = ri.cov()*252
-        corr = ri.corr()
+        cov = self.ri.cov()*252
+        corr = self.ri.corr()
     
         #Pegar a distância da matriz de correlação
         dist=correlDist(corr)
@@ -155,14 +228,15 @@ class Portfolio:
         """
         
         pesos = np.array(pesos)[:,0]
-        ri_analise_ponderada = pesos*self.dataset
+        ri_analise_ponderada = pesos*self.ri
         ri_analise_ponderada[nome] = ri_analise_ponderada.sum(axis = 1)
         ri_analise_ponderada = ri_analise_ponderada[[nome]]
         
         return ri_analise_ponderada
 
     def backtesting(self, data_inicio_analise, duracao_carteria = 30, 
-                    avaliacao_historico = 365):
+                    avaliacao_historico = 365, taxa_livre_risco = 0):
+        
         
         """
         
@@ -218,13 +292,9 @@ class Portfolio:
             
             #Base de cotações para análise do desempenho da carteira           
             base_analise = self.dataset[data_inicio_analise:data_fim_analise]
-            
-            #Calcular retornos base de cotações para análise
-            ri_analise = base_analise.pct_change(1)
-            ri_analise = ri_analise.dropna()
-            
+                        
             #Criar um objeto para para avaliar o desempenho de cada carteira
-            ri_analise = Portfolio(ri_analise)
+            ri_analise = Portfolio(base_analise)
             
             #função para avaliar o desempenho do portofolio
             desempenho_portfolio_min_risco = ri_analise.avaliar_desempenho_portfolio(pesos_minimo_risco,"Portfolio minimo risco")
@@ -250,21 +320,13 @@ class Portfolio:
             #Adicionar retornos obtidos na base de retorno de todos os períodos avaliados
             base_retorno = base_retorno.append(retornos)
         
-        #Criar uma tabela resumo e calcular o retorno das carteiras
-        tabela_resumo = pd.DataFrame(base_retorno.mean())
-        tabela_resumo = tabela_resumo.rename(columns = {0:"Retorno"}).reset_index()
         
-        #Calcular o risco das carteiras
-        sigma = pd.DataFrame(base_retorno.std())
-        sigma = sigma.rename(columns = {0:"Risco"}).reset_index()
-        tabela_resumo = tabela_resumo.merge(sigma, on = "index", how = 'left')
+        base_retorno = Portfolio(base_retorno, calcular_retornos_diarios = False)
         
-        #Calcular o Sharpe 
-        tabela_resumo['Sharpe'] = tabela_resumo['Retorno']/tabela_resumo['Risco']
-        tabela_resumo = tabela_resumo.rename(columns = {'index':"Portfolios"}).set_index('Portfolios')
+        tabela_resumo = base_retorno.tabela_resumo(taxa_livre_risco)
 
         #Calcular retornos acumulados
-        base_retorno_acumulado = base_retorno.cumsum()
+        base_retorno_acumulado = base_retorno.ri.cumsum()
         base_retorno_acumulado.plot()
         
         return tabela_resumo
