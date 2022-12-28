@@ -18,15 +18,41 @@ cotacoes = web.get_data_yahoo(tickers, start = "2017-01-01", end = "2021-12-31")
 cotacoes = cotacoes.fillna(method = 'ffill')
 
 #Criar o objeto carteira
-carteria = Portfolio(cotacoes)
+carteira = Portfolio(cotacoes)
 
-#Calcular os pesos dos ativos para cada carteira
-pesos_min_risco = carteria.portfolio_minimo_risco()
-pesos_max_sharpe = carteria.portfolio_max_sharp()
-pesos_hrp = carteria.portfolio_HRP()
 
-#Chamar função para realizar backtesting
-base_retorno = carteria.backtesting(data_inicio_analise = pd.to_datetime("2019-01-01"))
+#Funções Básicas
+
+#Calcular o retorno e volatilidade anual de cada ativo
+retorno_anual = carteira.calcular_retorno_anual()
+volatilidade_anual = carteira.calcular_volatilidade_anual()
+
+#Calcular o índice Sharpe de cada ativo
+sharpe = carteira.calcular_sharpe()
+
+#Calcular o máximo drawdown de cada ativo
+max_drawdown = carteira.max_drawdown()
+
+#Calcular o drawdown de um ativo específico
+carteira.drawdown(coluna = ['VALE3.SA'])
+
+#Mostrar uma tabela resumo para os indicadores calculados acima
+tabela_resumo = carteira.tabela_resumo()
+
+#Otimização de Portfolios
+
+#Determinar os pesos para alocação de cada portfolio
+pesos_min_risco = carteira.portfolio_minimo_risco()
+pesos_max_sharpe = carteira.portfolio_max_sharp()
+pesos_hrp = carteira.portfolio_HRP()
+
+#Avaliar o desempenho de cada portfolio
+retornos = carteira.avaliar_desempenho_portfolio(pesos_min_risco, "Portfolio MInimo Risco")
+
+#Simulação
+
+#Realizar backtesting
+tabela_retornos = carteira.backtesting(data_inicio_analise = pd.to_datetime("2019-01-01"))
 
 
         
